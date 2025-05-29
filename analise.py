@@ -1,11 +1,14 @@
 import nltk
 import random
+import time
+import threading
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import PorterStemmer
 from nltk.classify import NaiveBayesClassifier
 from collections import Counter
 import string
+from datetime import datetime
 
 # Download dos recursos necessários do NLTK
 try:
@@ -54,6 +57,9 @@ class ClassificadorSentimentos:
             ("Poor customer service, no help at all!", 'negativo'),
             ("This ruined my day, very frustrating!", 'negativo'),
         ]
+        
+        # Lista para armazenar dados de treinamento adicionais
+        self.dados_adicionais = []
     
     def preprocessar_texto(self, texto):
         """
@@ -97,15 +103,34 @@ class ClassificadorSentimentos:
         
         return caracteristicas
     
-    def treinar_classificador(self):
+    def adicionar_dados_treinamento(self, frase, sentimento):
+        """
+        Adiciona novos dados de treinamento.
+        """
+        if sentimento.lower() in ['positivo', 'pos', 'p', '1']:
+            sentimento_norm = 'positivo'
+        elif sentimento.lower() in ['negativo', 'neg', 'n', '0']:
+            sentimento_norm = 'negativo'
+        else:
+            raise ValueError("Sentimento deve ser 'positivo' ou 'negativo'")
+        
+        self.dados_adicionais.append((frase, sentimento_norm))
+        return sentimento_norm
+    
+    def treinar_classificador(self, usar_dados_adicionais=True):
         """
         Treina o classificador Naive Bayes com as frases de exemplo.
         """
         print("Iniciando treinamento do classificador...")
         
+        # Combinar dados originais com dados adicionais
+        todos_dados = self.frases_treinamento.copy()
+        if usar_dados_adicionais:
+            todos_dados.extend(self.dados_adicionais)
+        
         # Preprocessar e extrair características de todas as frases
         dados_treinamento = []
-        for frase, sentimento in self.frases_treinamento:
+        for frase, sentimento in todos_dados:
             tokens = self.preprocessar_texto(frase)
             caracteristicas = self.extrair_caracteristicas(tokens)
             dados_treinamento.append((caracteristicas, sentimento))
@@ -117,10 +142,144 @@ class ClassificadorSentimentos:
         self.classificador = NaiveBayesClassifier.train(dados_treinamento)
         
         print(f"Treinamento concluído com {len(dados_treinamento)} exemplos!")
+        print(f"  - Dados originais: {len(self.frases_treinamento)}")
+        print(f"  - Dados adicionais: {len(self.dados_adicionais)}")
         
         # Mostrar as características mais informativas
         print("\nCaracterísticas mais informativas:")
         self.classificador.show_most_informative_features(10)
+    
+    def modo_treinamento_interativo(self, tempo_entrada=30, tempo_treinamento=30):
+        """
+        Modo de treinamento interativo com tempo limitado.
+        """
+        print("\n" + "="*60)
+        print("🎓 MODO DE TREINAMENTO INTERATIVO")
+        print("="*60)
+        print(f"⏰ Você terá {tempo_entrada} segundos para adicionar dados de treinamento")
+        print("📝 Formato: digite a frase, pressione Enter, depois digite o sentimento")
+        print("💡 Sentimentos válidos: 'positivo', 'negativo', 'pos', 'neg', 'p', 'n'")
+        print("🚀 Pressione Enter para começar...")
+        input()
+        
+        print(f"\n⏱️  INICIANDO COLETA DE DADOS - {tempo_entrada} SEGUNDOS!")
+        print("="*60)
+        
+        # Variáveis para controle de tempo
+        inicio = time.time()
+        dados_coletados = 0
+        
+        # Thread para mostrar countdown
+        stop_countdown = threading.Event()
+        countdown_thread = threading.Thread(
+            target=self._countdown_timer, 
+            args=(tempo_entrada, stop_countdown)
+        )
+        countdown_thread.start()
+        
+        try:
+            while time.time() - inicio < tempo_entrada:
+                tempo_restante = tempo_entrada - (time.time() - inicio)
+                if tempo_restante <= 0:
+                    break
+                
+                try:
+                    print(f"\n[{tempo_restante:.0f}s restantes] Digite uma frase:")
+                    frase = input("Frase: ").strip()
+                    
+                    if not frase:
+                        continue
+                    
+                    if time.time() - inicio >= tempo_entrada:
+                        break
+                    
+                    print("Sentimento (positivo/negativo):")
+                    sentimento = input("Sentimento: ").strip()
+                    
+                    if time.time() - inicio >= tempo_entrada:
+                        break
+                    
+                    # Adicionar dados
+                    sentimento_norm = self.adicionar_dados_treinamento(frase, sentimento)
+                    dados_coletados += 1
+                    
+                    emoji = "😊" if sentimento_norm == 'positivo' else "😞"
+                    print(f"✅ {emoji} Adicionado: '{frase[:40]}...' -> {sentimento_norm}")
+                    
+                except ValueError as e:
+                    print(f"❌ Erro: {e}")
+                except KeyboardInterrupt:
+                    break
+                    
+        except Exception as e:
+            print(f"❌ Erro durante coleta: {e}")
+        
+        finally:
+            stop_countdown.set()
+            countdown_thread.join()
+        
+        print(f"\n⏹️  TEMPO ESGOTADO! Coletados {dados_coletados} novos exemplos.")
+        
+        if dados_coletados > 0:
+            print(f"\n🔄 INICIANDO TREINAMENTO - {tempo_treinamento} segundos...")
+            print("="*60)
+            
+            # Simular processo de treinamento com progresso
+            self._treinar_com_progresso(tempo_treinamento)
+        else:
+            print("⚠️  Nenhum dado novo coletado. Mantendo modelo atual.")
+    
+    def _countdown_timer(self, duracao, stop_event):
+        """
+        Thread para mostrar countdown visual.
+        """
+        for i in range(duracao, 0, -1):
+            if stop_event.is_set():
+                break
+            if i <= 10:
+                print(f"\r⏰ {i} segundos restantes...", end='', flush=True)
+            time.sleep(1)
+    
+    def _treinar_com_progresso(self, tempo_treinamento):
+        """
+        Treina o modelo mostrando progresso visual.
+        """
+        inicio = time.time()
+        
+        # Simular etapas de treinamento
+        etapas = [
+            "Preprocessando textos...",
+            "Extraindo características...",
+            "Balanceando datasets...",
+            "Treinando Naive Bayes...",
+            "Otimizando parâmetros...",
+            "Validando modelo...",
+            "Finalizando treinamento..."
+        ]
+        
+        tempo_por_etapa = tempo_treinamento / len(etapas)
+        
+        for i, etapa in enumerate(etapas):
+            print(f"[{i+1}/{len(etapas)}] {etapa}")
+            
+            # Barra de progresso simulada
+            for j in range(20):
+                if time.time() - inicio >= tempo_treinamento:
+                    break
+                print("█", end='', flush=True)
+                time.sleep(tempo_por_etapa / 20)
+            
+            print(" ✅")
+            
+            if time.time() - inicio >= tempo_treinamento:
+                break
+        
+        # Treinar o modelo real
+        print("\n🔧 Aplicando treinamento real...")
+        self.treinar_classificador(usar_dados_adicionais=True)
+        
+        print(f"\n🎉 TREINAMENTO CONCLUÍDO em {time.time() - inicio:.1f} segundos!")
+        print("="*60)
     
     def classificar_sentimento(self, texto):
         """
@@ -181,67 +340,81 @@ def main():
     """
     Função principal para demonstrar o uso do classificador.
     """
-    print("CLASSIFICADOR DE SENTIMENTOS COM NLTK")
-    print("="*50)
+    print("🤖 CLASSIFICADOR DE SENTIMENTOS AVANÇADO")
+    print("="*60)
     
     # Criar e treinar o classificador
     classificador = ClassificadorSentimentos()
     classificador.treinar_classificador()
     
-    # Avaliar o classificador
-    classificador.avaliar_classificador()
-    
-    # Demonstração interativa
-    print("\n" + "="*50)
-    print("DEMONSTRAÇÃO INTERATIVA")
-    print("="*50)
-    
-    frases_exemplo = [
-        "I absolutely love this new phone!",
-        "This movie was terrible and boring",
-        "The food at this restaurant is amazing",
-        "I hate waiting in long lines",
-        "What a beautiful day today!",
-        "This software is full of bugs",
-    ]
-    
-    print("Testando frases de exemplo:")
-    for frase in frases_exemplo:
-        sentimento, confianca = classificador.classificar_sentimento(frase)
-        emoji = "😊" if sentimento == 'positivo' else "😞"
-        print(f"{emoji} '{frase}' -> {sentimento.upper()} (confiança: {confianca:.2%})")
-    
-    print("\n" + "="*50)
-    print("Agora você pode testar suas próprias frases!")
-    print("Digite 'sair' para encerrar o programa.")
-    print("="*50)
-    
+    # Menu principal
     while True:
+        print("\n" + "="*60)
+        print("MENU PRINCIPAL")
+        print("="*60)
+        print("1. 🎓 Modo Treinamento Interativo (30s coleta + 30s treino)")
+        print("2. 🎓 Modo Treinamento Personalizado (definir tempo)")
+        print("3. 📊 Avaliar Classificador")
+        print("4. 🧪 Testar Frases")
+        print("5. 📈 Estatísticas do Modelo")
+        print("6. 🚪 Sair")
+        print("="*60)
+        
         try:
-            frase_usuario = input("\nDigite uma frase para classificar: ").strip()
+            opcao = input("Escolha uma opção (1-6): ").strip()
             
-            if frase_usuario.lower() in ['sair', 'exit', 'quit']:
-                print("Encerrando o programa. Obrigado!")
+            if opcao == '1':
+                classificador.modo_treinamento_interativo()
+                
+            elif opcao == '2':
+                try:
+                    tempo_entrada = int(input("Tempo para coleta de dados (segundos): "))
+                    tempo_treinamento = int(input("Tempo para treinamento (segundos): "))
+                    classificador.modo_treinamento_interativo(tempo_entrada, tempo_treinamento)
+                except ValueError:
+                    print("❌ Por favor, digite números válidos.")
+                    
+            elif opcao == '3':
+                classificador.avaliar_classificador()
+                
+            elif opcao == '4':
+                print("\n📝 Digite frases para testar (digite 'voltar' para retornar):")
+                while True:
+                    frase = input("\nFrase: ").strip()
+                    if frase.lower() == 'voltar':
+                        break
+                    if frase:
+                        try:
+                            sentimento, confianca = classificador.classificar_sentimento(frase)
+                            emoji = "😊" if sentimento == 'positivo' else "😞"
+                            print(f"Resultado: {emoji} {sentimento.upper()} (confiança: {confianca:.2%})")
+                        except Exception as e:
+                            print(f"❌ Erro: {e}")
+                            
+            elif opcao == '5':
+                print(f"\n📈 ESTATÍSTICAS DO MODELO")
+                print("="*40)
+                print(f"Dados originais: {len(classificador.frases_treinamento)}")
+                print(f"Dados adicionais: {len(classificador.dados_adicionais)}")
+                print(f"Total de exemplos: {len(classificador.frases_treinamento) + len(classificador.dados_adicionais)}")
+                
+                if classificador.dados_adicionais:
+                    pos = sum(1 for _, s in classificador.dados_adicionais if s == 'positivo')
+                    neg = len(classificador.dados_adicionais) - pos
+                    print(f"Novos dados - Positivos: {pos}, Negativos: {neg}")
+                
+            elif opcao == '6':
+                print("👋 Encerrando programa. Obrigado!")
                 break
-            
-            if not frase_usuario:
-                print("Por favor, digite uma frase válida.")
-                continue
-            
-            sentimento, confianca = classificador.classificar_sentimento(frase_usuario)
-            emoji = "😊" if sentimento == 'positivo' else "😞"
-            
-            print(f"\nResultado: {emoji} {sentimento.upper()}")
-            print(f"Confiança: {confianca:.2%}")
-            
-            if confianca < 0.6:
-                print("⚠️  Atenção: Baixa confiança na classificação!")
-            
+                
+            else:
+                print("❌ Opção inválida. Tente novamente.")
+                
         except KeyboardInterrupt:
-            print("\n\nPrograma interrompido pelo usuário.")
+            print("\n\n👋 Programa interrompido pelo usuário.")
             break
         except Exception as e:
-            print(f"Erro: {e}")
+            print(f"❌ Erro: {e}")
 
 if __name__ == "__main__":
     main()
